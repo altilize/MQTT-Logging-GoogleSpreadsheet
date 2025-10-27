@@ -6,16 +6,16 @@ void setup() {
 
 void loop() {
   if (!mqttClient.connected()) {
-    reconnect();
+    reconnect();  // PERHATIAN: Ini memblokir jika MQTT terputus
   }
   mqttClient.loop();
 
-  // ----------- send data to MQTT ---------------
+  handleButtons();  // Cek tombol di setiap loop, ini harus sering dipanggil agar responsif
+
   long now = millis();
   if (now - previous_time > 1000) {
     previous_time = now;
 
-    // Input Data MQTT
     int result = dht11.readTemperatureHumidity(temperature, humidity);
     String payload = "{";
     payload += "\"temperature\":";
@@ -25,19 +25,12 @@ void loop() {
     payload += String(humidity);
     payload += "}";
 
-    // Debug
     Serial.print("Mengirim payload: ");
     Serial.println(payload);
 
     if (result == 0) {
-      if (humidity > 0 && humidity < 20) {
-
-      } else if (humidity >= 20 && humidity < 60) {
-     
-      } else if (humidity >= 60) {
-        
-      }
-
+      updateDisplay();  // Update OLED dengan data terbaru
+      updateLED(humidity);
     } else {
       Serial.println(DHT11::getErrorString(result));
     }
