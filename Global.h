@@ -52,8 +52,11 @@ const int MAX_BRIGHTNESS = 255;  // Kecerahan maksimum (default ESP32)
 const int BUTTON_LEFT = 19;
 const int BUTTON_SELECT = 18;
 const int BUTTON_RIGHT = 17;
+bool isBuzzerOn = false;            // Untuk mengingat status buzzer
+unsigned long buzzerTriggerTime = 0;  // Untuk mengingat kapan buzzer mulai nyala
+const long buzzerMinOnTime = 3000;  // Waktu minimum nyala (3 detik)
 
-#define BUZZER 5
+#define BUZZER 16
 
 // --- Variabel State untuk UI dan Tombol ---
 int currentSlide = 1;  // 1 untuk Humidity, 2 untuk Temperature
@@ -187,7 +190,7 @@ void initialSetup() {
   setupMQTT();
 
   pinMode(BUZZER, OUTPUT);
-  digitalWrite(BUZZER, LOW);
+  digitalWrite(BUZZER, HIGH);
 
   pinMode(BUTTON_LEFT, INPUT_PULLUP);
   pinMode(BUTTON_RIGHT, INPUT_PULLUP);
@@ -227,8 +230,6 @@ void initialSetup() {
 }
 
 // --------- LED ------------/
-// -------- Update Tampilan LED (Versi analogWrite) --------
-// -------- Update Tampilan LED (Versi "Bar Level" - Hanya Humidity) --------
 void updateLED(int hum) {
   // ----- RESET SEMUA LED KE 0 (MATI) DULU -----
   analogWrite(LED_HIJAU_1_PIN, 0);
@@ -239,76 +240,105 @@ void updateLED(int hum) {
   analogWrite(LED_MERAH_2_PIN, 0);
 
   long brightness;
-  int deviation = abs(hum - 50); 
-
+  int deviation = abs(hum - 50);
 
   // Zona 6: PARAH BANGET (Deviasi > 25 / Hum < 25 atau > 75)
-  // 2 Hijau + 2 Kuning + 1 Merah (Full) + Merah ke-2 (Fade-in)
   if (deviation > 25) {
     analogWrite(LED_HIJAU_1_PIN, MAX_BRIGHTNESS);
     analogWrite(LED_HIJAU_2_PIN, MAX_BRIGHTNESS);
     analogWrite(LED_KUNING_1_PIN, MAX_BRIGHTNESS);
     analogWrite(LED_KUNING_2_PIN, MAX_BRIGHTNESS);
     analogWrite(LED_MERAH_1_PIN, MAX_BRIGHTNESS);
-    // LED Merah ke-2 fade-in, lalu mentok di MAX
     brightness = map(deviation, 25, 30, MIN_BRIGHTNESS, MAX_BRIGHTNESS);
-    if (brightness > MAX_BRIGHTNESS) brightness = MAX_BRIGHTNESS; // Batasi
+    if (brightness > MAX_BRIGHTNESS) brightness = MAX_BRIGHTNESS;
     analogWrite(LED_MERAH_2_PIN, brightness);
-    digitalWrite(BUZZER, HIGH);
+    // (digitalWrite buzzer dihapus dari sini)
   }
   // Zona 5: PARAH (Deviasi 20-25 / Hum 25-30 atau 70-75)
-  // 2 Hijau + 2 Kuning (Full) + Merah 1 (Fade-in)
-  else if (deviation > 20) { 
+  else if (deviation > 20) {
     analogWrite(LED_HIJAU_1_PIN, MAX_BRIGHTNESS);
     analogWrite(LED_HIJAU_2_PIN, MAX_BRIGHTNESS);
     analogWrite(LED_KUNING_1_PIN, MAX_BRIGHTNESS);
     analogWrite(LED_KUNING_2_PIN, MAX_BRIGHTNESS);
     brightness = map(deviation, 20, 25, MIN_BRIGHTNESS, MAX_BRIGHTNESS);
     analogWrite(LED_MERAH_1_PIN, brightness);
-    digitalWrite(BUZZER, HIGH);
+    // (digitalWrite buzzer dihapus dari sini)
   }
   // Zona 4: TIDAK IDEAL BANGET (Deviasi 15-20 / Hum 30-35 atau 65-70)
-  // 2 Hijau + 1 Kuning (Full) + Kuning ke-2 (Fade-in)
-  else if (deviation > 15) { 
+  else if (deviation > 15) {
     analogWrite(LED_HIJAU_1_PIN, MAX_BRIGHTNESS);
     analogWrite(LED_HIJAU_2_PIN, MAX_BRIGHTNESS);
     analogWrite(LED_KUNING_1_PIN, MAX_BRIGHTNESS);
     brightness = map(deviation, 15, 20, MIN_BRIGHTNESS, MAX_BRIGHTNESS);
     analogWrite(LED_KUNING_2_PIN, brightness);
-    digitalWrite(BUZZER, LOW);
+    // (digitalWrite buzzer dihapus dari sini)
   }
   // Zona 3: TIDAK IDEAL (Deviasi 10-15 / Hum 35-40 atau 60-65)
-  // 2 Hijau (Full) + 1 Kuning (Fade-in)
-  else if (deviation > 10) { 
+  else if (deviation > 10) {
     analogWrite(LED_HIJAU_1_PIN, MAX_BRIGHTNESS);
     analogWrite(LED_HIJAU_2_PIN, MAX_BRIGHTNESS);
     brightness = map(deviation, 10, 15, MIN_BRIGHTNESS, MAX_BRIGHTNESS);
     analogWrite(LED_KUNING_1_PIN, brightness);
-    digitalWrite(BUZZER, LOW);
+    // (digitalWrite buzzer dihapus dari sini)
   }
   // Zona 2: IDEAL MENUJU TIDAK IDEAL (Deviasi 5-10 / Hum 40-45 atau 55-60)
-  // 1 Hijau (Full) + Hijau ke-2 (Fade-in)
-  else if (deviation > 5) { 
+  else if (deviation > 5) {
     analogWrite(LED_HIJAU_1_PIN, MAX_BRIGHTNESS);
     brightness = map(deviation, 5, 10, MIN_BRIGHTNESS, MAX_BRIGHTNESS);
     analogWrite(LED_HIJAU_2_PIN, brightness);
-    digitalWrite(BUZZER, LOW);
+    // (digitalWrite buzzer dihapus dari sini)
   }
   // Zona 1: IDEAL (Deviasi 0-5 / Hum 45-55)
-  // 1 Hijau (Fade-out saat menjauh dari 50)
-  else if (deviation <= 5) { 
+  else if (deviation <= 5) {
     brightness = map(deviation, 0, 5, MAX_BRIGHTNESS, MIN_BRIGHTNESS);
     analogWrite(LED_HIJAU_1_PIN, brightness);
-    digitalWrite(BUZZER, LOW);
+    // (digitalWrite buzzer dihapus dari sini)
   }
-  
+
+  // Cek jika sensor error (hum <= 0)
   if (hum <= 0) {
-      analogWrite(LED_HIJAU_1_PIN, 0);
-      analogWrite(LED_HIJAU_2_PIN, 0);
-      analogWrite(LED_KUNING_1_PIN, 0);
-      analogWrite(LED_KUNING_2_PIN, 0);
-      analogWrite(LED_MERAH_1_PIN, MAX_BRIGHTNESS);
-      analogWrite(LED_MERAH_2_PIN, MAX_BRIGHTNESS);
-      digitalWrite(BUZZER, HIGH);
+    analogWrite(LED_HIJAU_1_PIN, 0);
+    analogWrite(LED_HIJAU_2_PIN, 0);
+    analogWrite(LED_KUNING_1_PIN, 0);
+    analogWrite(LED_KUNING_2_PIN, 0);
+    analogWrite(LED_MERAH_1_PIN, MAX_BRIGHTNESS);
+    analogWrite(LED_MERAH_2_PIN, MAX_BRIGHTNESS);
+    // (digitalWrite buzzer dihapus dari sini)
+  }
+
+  // ---------------------------------------------------
+  // --- LOGIKA BUZZER BARU (NON-BLOCKING LATCH) ---
+  // ---------------------------------------------------
+
+  unsigned long currentTime = millis();
+  
+  // Tentukan kondisi alarm. Alarm nyala jika deviasi > 20 (Zona 5 & 6) ATAU sensor error
+  bool alarmConditionMet = (deviation > 20) || (hum <= 0);
+
+  if (alarmConditionMet) {
+    // --- KONDISI ALARM TERPENUHI ---
+    
+    if (!isBuzzerOn) {
+      // Buzzer sedang OFF, kita HARUS menyalakannya.
+      isBuzzerOn = true;
+      buzzerTriggerTime = currentTime; // Catat waktu mulai nyala
+      digitalWrite(BUZZER, LOW);       // NYALAKAN Buzzer (Logika Terbalik)
+    }
+    // else: Jika isBuzzerOn sudah true, berarti buzzer memang sudah nyala.
+    // Biarkan saja, tidak perlu melakukan apa-apa.
+
+  } else {
+    // --- KONDISI ALARM TIDAK TERPENUHI (ZONA AMAN) ---
+    
+    if (isBuzzerOn) {
+      // Buzzer sedang ON, tapi kita di zona aman.
+      // Cek apakah sudah 3 detik berlalu sejak buzzer nyala.
+      if (currentTime - buzzerTriggerTime >= buzzerMinOnTime) {
+        // SUDAH 3 DETIK, matikan buzzer.
+        isBuzzerOn = false;
+        digitalWrite(BUZZER, HIGH); // MATIKAN Buzzer (Logika Terbalik)
+      }
+
+    }
   }
 }
